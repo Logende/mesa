@@ -55,7 +55,7 @@ class ModelCachable:
         self.model = model
         self.cache_file_path = Path(cache_file_path)
         self._cache_state = cache_state
-        self.cache: List[str] = []
+        self.cache: List[Any] = []
         self.step_count: int = 0
 
         if self._cache_state is CacheState.READ:
