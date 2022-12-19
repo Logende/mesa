@@ -7,11 +7,8 @@ from pathlib import Path
 
 
 class ModelFibonacci(Model):
-
-    def __init__(self):
-        super().__init__(seed=23)
-        self.previous = 0
-        self.current = 1
+    previous = 0
+    current = 1
 
     def step(self):
         new_value = self.previous + self.current
