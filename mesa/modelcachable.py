@@ -47,7 +47,7 @@ def _read_cache_file(cache_file_path: Path) -> List[Any]:
 def _write_complete_state_to_json_string(model: Model) -> Any:
     """Default function for writing the current model state into a string.
     Used by ModelCachable if not replaced by a custom write function.
-    Uses pickle to dump the complete model.__dict__ to a string"""
+    Uses pickle to dump the complete model.__dict__ to the output."""
     return pickle.dumps(model.__dict__)
 
 
@@ -55,7 +55,7 @@ def _write_complete_state_to_json_string(model: Model) -> Any:
 def _load_complete_state_from_json_string(state_json: Any, model: Model) -> None:
     """Default function for reading the current model state from a string.
     Used by ModelCachable if not replaced by a custom read function.
-    Expects that the given string is the model.__dict__ dumped by pickle."""
+    Expects that the given input is the model.__dict__ dumped by pickle."""
     model.__dict__ = pickle.loads(state_json)
 
 
