@@ -34,14 +34,13 @@ class TestModelCachable(unittest.TestCase):
         with TemporaryDirectory() as tmp_dir_path:
             cache_file_path = Path(tmp_dir_path).joinpath("cache_file_not_existing")
 
-            # Simulate
-            model_simulate = ModelFibonacci()
+            model = ModelFibonacci()
 
             # No exception when constructing ModelCachable with CacheState.WRITE because does not try to read cache
-            ModelCachable(model_simulate, cache_file_path, CacheState.WRITE)
+            ModelCachable(model, cache_file_path, CacheState.WRITE)
 
             # Exception when trying to construct ModelCachable with CacheState.READ and non-existing cache file
-            self.assertRaises(Exception, ModelCachable, model_simulate, cache_file_path, CacheState.READ)
+            self.assertRaises(Exception, ModelCachable, model, cache_file_path, CacheState.READ)
 
     def test_compare_replay_with_simulation(self):
         with TemporaryDirectory() as tmp_dir_path:
