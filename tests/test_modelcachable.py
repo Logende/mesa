@@ -7,8 +7,11 @@ from pathlib import Path
 
 
 class ModelFibonacci(Model):
-    previous = 0
-    current = 1
+
+    def __init__(self):
+        super().__init__(seed=23)
+        self.previous = 0
+        self.current = 1
 
     def step(self):
         new_value = self.previous + self.current
@@ -103,3 +106,22 @@ class TestModelCachable(unittest.TestCase):
             model_simulate.run_model()
 
             assert mock_function.call_count == 1
+
+    def test_replay_finish_identical_to_simulation_finish(self):
+        with TemporaryDirectory() as tmp_dir_path:
+            cache_file_path = Path(tmp_dir_path).joinpath("cache_file")
+
+            model_simulate = ModelFibonacci()
+            model_simulate = ModelCachable(model_simulate, cache_file_path, CacheState.WRITE)
+            model_simulate.run_model()
+            final_value_simulation = model_simulate.current
+            final_step_simulation = model_simulate.step_count
+
+            model_replay = ModelFibonacci()
+            model_replay = ModelCachable(model_replay, cache_file_path, CacheState.READ)
+            model_replay.run_model()
+            final_value_replay = model_simulate.current
+            final_step_replay = model_replay.step_count
+
+            assert final_step_replay == final_step_simulation
+            assert final_value_replay == final_value_simulation

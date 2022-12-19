@@ -56,7 +56,7 @@ class ModelCachable:
         self.cache_file_path = Path(cache_file_path)
         self._cache_state = cache_state
         self.cache: List[str] = []
-        self.step_number: int = 0
+        self.step_count: int = 0
 
         if self._cache_state is CacheState.READ:
             self.read_cache_file()
@@ -106,14 +106,14 @@ class ModelCachable:
             self.cache.append(self.serialize_state())
 
         elif self._cache_state is CacheState.READ:
-            model_state_of_step_string = self.cache[self.step_number]
+            model_state_of_step_string = self.cache[self.step_count]
             self.deserialize_state(model_state_of_step_string)
 
             # after reading the last step: stop simulation
-            if self.step_number == len(self.cache) - 1:
+            if self.step_count == len(self.cache) - 1:
                 self.model.running = False
 
-        self.step_number = self.step_number + 1
+        self.step_count = self.step_count + 1
 
     def __getattr__(self, item):
         """Act as proxy: forward all attributes (including function calls) from actual model."""
