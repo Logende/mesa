@@ -7,53 +7,62 @@ Core Objects: ModelCachable
 # Remove this __future__ import once the oldest supported Python is 3.10
 from __future__ import annotations
 
-import os.path as path
+from pathlib import Path
 from enum import Enum
 
-import json
+import pickle
+import gzip
 
 from mesa import Model
 
 # mypy
-from typing import List
+from typing import Any, List
 
 
 class CacheState(Enum):
-    WRITING = 1,
-    READING = 2
+    WRITE = 1,
+    READ = 2
 
 
 @staticmethod
-def _write_cache_file(cache_file_path: path, cache_data: List[str]) -> None:
-    json.dump(cache_data, cache_file_path)
-    # todo: add file compression
+def _write_cache_file(cache_file_path: Path, cache_data: List[Any]) -> None:
+    """Default function for writing the given cache data to the cache file.
+    Used by ModelCachable if not replaced by a custom write function.
+    Uses pickle to dump the data into the file.
+    Uses gzip for compression."""
+    with gzip.open(cache_file_path, 'wb') as file:
+        pickle.dump(cache_data, file)
 
 
 @staticmethod
-def _read_cache_file(cache_file_path: path) -> List[str]:
-    return json.load(cache_file_path)
+def _read_cache_file(cache_file_path: Path) -> List[Any]:
+    """Default function for reading the cache data from the cache file.
+    Used by ModelCachable if not replaced by a custom read function.
+    Expects that gzip and pickle have been used to write the file."""
+    with gzip.open(cache_file_path, 'rb') as file:
+        return pickle.load(file)
 
 
 @staticmethod
-def _write_complete_state_to_json_string(model: Model) -> str:
-    model_dict_copy = model.__dict__.copy()
-    # remove random because it is not JSON serializable
-    model_dict_copy["random"] = None
-    return json.dumps(model_dict_copy)
+def _write_complete_state_to_json_string(model: Model) -> Any:
+    """Default function for writing the current model state into a string.
+    Used by ModelCachable if not replaced by a custom write function.
+    Uses pickle to dump the complete model.__dict__ to a string"""
+    return pickle.dumps(model.__dict__)
 
 
 @staticmethod
-def _load_complete_state_from_json_string(state_json_string: str, model: Model) -> None:
-    existing_random = model.random
-    state_dict = json.loads(state_json_string)
-    model.__dict__ = state_dict
-    model.random = existing_random
+def _load_complete_state_from_json_string(state_json: Any, model: Model) -> None:
+    """Default function for reading the current model state from a string.
+    Used by ModelCachable if not replaced by a custom read function.
+    Expects that the given string is the model.__dict__ dumped by pickle."""
+    model.__dict__ = pickle.loads(state_json)
 
 
 class ModelCachable:
     """Class that takes a model and writes its steps to a cache file."""
 
-    def __init__(self, model: Model, cache_file_path: path, cache_state: CacheState) -> None:
+    def __init__(self, model: Model, cache_file_path: str, cache_state: CacheState) -> None:
         """Create a new caching wrapper around an existing mesa model instance.
 
         Attributes:
@@ -62,12 +71,12 @@ class ModelCachable:
             cache_state: whether to replay by reading from the cache or simulate and write to the cache
         """
         self.model = model
-        self.cache_file_path = cache_file_path
+        self.cache_file_path = Path(cache_file_path)
         self._cache_state = cache_state
         self.cache: List[str] = []
         self.step_number: int = 0
 
-        if self._cache_state is CacheState.READING:
+        if self._cache_state is CacheState.READ:
             self.read_cache_file()
 
     def write_state_to_string(self) -> str:
@@ -90,6 +99,7 @@ class ModelCachable:
         Needs to remain compatible with 'read_cache_file'
         """
         _write_cache_file(self.cache_file_path, self.cache)
+        print("Wrote ModelCachable cache file to " + str(self.cache_file_path))
 
     def read_cache_file(self):
         """Reads the cache from 'cache_file_path' into memory.
@@ -104,16 +114,17 @@ class ModelCachable:
         self.model.run_model()
 
         # model run finished -> write to cache if in writing state
-        if self._cache_state is CacheState.WRITING:
+        if self._cache_state is CacheState.WRITE:
             self.write_cache_file()
 
     def step(self) -> None:
         """A single step."""
-        if self._cache_state is CacheState.WRITING:
+        print("step")
+        if self._cache_state is CacheState.WRITE:
             self.model.step()
             self.cache.append(self.write_state_to_string())
 
-        elif self._cache_state is CacheState.READING:
+        elif self._cache_state is CacheState.READ:
             model_state_of_step_string = self.cache[self.step_number]
             self.load_state_from_string(model_state_of_step_string)
 
@@ -123,19 +134,6 @@ class ModelCachable:
 
         self.step_number = self.step_number + 1
 
-    def next_id(self) -> int:
-        """Return the next unique ID for agents, increment current_id"""
-        return self.model.next_id()
-
-    def reset_randomizer(self, seed: int | None = None) -> None:
-        """Reset the model random number generator.
-
-        Args:
-            seed: A new seed for the RNG; if None, reset using the current seed
-        """
-        self.model.reset_randomizer()
-
-    def initialize_data_collector(
-        self, model_reporters=None, agent_reporters=None, tables=None
-    ) -> None:
-        self.model.initialize_data_collector(model_reporters, agent_reporters, tables)
+    def __getattr__(self, item):
+        """Act as proxy: forward all attributes (including function calls) from actual model."""
+        return self.model.__getattribute__(item)
