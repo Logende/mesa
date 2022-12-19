@@ -44,16 +44,16 @@ def _read_cache_file(cache_file_path: Path) -> List[Any]:
 
 
 @staticmethod
-def _write_complete_state_to_json_string(model: Model) -> Any:
-    """Default function for writing the current model state into a string.
+def _write_complete_state_pickle_output(model: Model) -> Any:
+    """Default function for writing the current model state to the output.
     Used by ModelCachable if not replaced by a custom write function.
     Uses pickle to dump the complete model.__dict__ to the output."""
     return pickle.dumps(model.__dict__)
 
 
 @staticmethod
-def _load_complete_state_from_json_string(state_json: Any, model: Model) -> None:
-    """Default function for reading the current model state from a string.
+def _load_complete_state_from_pickle_input(state_json: Any, model: Model) -> None:
+    """Default function for reading the current model state from an input.
     Used by ModelCachable if not replaced by a custom read function.
     Expects that the given input is the model.__dict__ dumped by pickle."""
     model.__dict__ = pickle.loads(state_json)
@@ -84,14 +84,14 @@ class ModelCachable:
         Can be overwritten to write just parts of the state or other custom behavior.
         Needs to remain compatible with 'load_state_from_string'.
         """
-        return _write_complete_state_to_json_string(self.model)
+        return _write_complete_state_pickle_output(self.model)
 
     def load_state_from_string(self, state_string: str) -> None:
         """Loads the model state from the given string.
         Can be overwritten to load just parts of the state or other custom behavior.
         Needs to remain compatible with 'write_state_to_string'.
         """
-        _load_complete_state_from_json_string(state_string, self.model)
+        _load_complete_state_from_pickle_input(state_string, self.model)
 
     def write_cache_file(self):
         """Writes the cache from memory to 'cache_file_path'.
