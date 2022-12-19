@@ -25,7 +25,7 @@ class TestModelCachable(unittest.TestCase):
 
     def test_model_attribute_access_over_wrapper(self):
         model = ModelFibonacci()
-        model = ModelCachable(model, "todo", CacheState.WRITE)
+        model = ModelCachable(model, "irrelevant_cache_file_path", CacheState.WRITE)
         assert model.running is True
         assert model.previous == 0
         assert model.custom_model_function() == 1
