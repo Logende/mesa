@@ -30,14 +30,14 @@ class TestModelCachable(unittest.TestCase):
         assert model.previous == 0
         assert model.custom_model_function() == 1
 
-    def test_cache_read_fail_when_invalid_file_path(self):
+    def test_cache_read_fail_when_non_existing_file(self):
         model = ModelFibonacci()
 
         # No exception when constructing ModelCachable with CacheState.WRITE because does not try to read cache
-        ModelCachable(model, "invalid_file_path", CacheState.WRITE)
+        ModelCachable(model, "non_existing_file", CacheState.WRITE)
 
         # Exception when trying to construct ModelCachable with CacheState.READ and non-existing cache file
-        self.assertRaises(Exception, ModelCachable, model, "invalid_file_path", CacheState.READ)
+        self.assertRaises(Exception, ModelCachable, model, "non_existing_file", CacheState.READ)
 
     def test_compare_replay_with_simulation(self):
         with TemporaryDirectory() as tmp_dir_path:
