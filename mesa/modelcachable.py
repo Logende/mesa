@@ -60,7 +60,7 @@ def _load_complete_state_from_pickle_input(state_json: Any, model: Model) -> Non
 
 
 class ModelCachable:
-    """Class that takes a model and writes its steps to a cache file."""
+    """Class that takes a model and writes its steps to a cache file or reads them from a cache file."""
 
     def __init__(self, model: Model, cache_file_path: Union[str, Path], cache_state: CacheState) -> None:
         """Create a new caching wrapper around an existing mesa model instance.
@@ -79,14 +79,14 @@ class ModelCachable:
         if self._cache_state is CacheState.READ:
             self.read_cache_file()
 
-    def write_state_to_string(self) -> str:
+    def write_state(self) -> Any:
         """Writes the model state to a string.
         Can be overwritten to write just parts of the state or other custom behavior.
         Needs to remain compatible with 'load_state_from_string'.
         """
         return _write_complete_state_pickle_output(self.model)
 
-    def load_state_from_string(self, state_string: str) -> None:
+    def load_state(self, state_string: Any) -> None:
         """Loads the model state from the given string.
         Can be overwritten to load just parts of the state or other custom behavior.
         Needs to remain compatible with 'write_state_to_string'.
@@ -121,11 +121,11 @@ class ModelCachable:
         """A single step."""
         if self._cache_state is CacheState.WRITE:
             self.model.step()
-            self.cache.append(self.write_state_to_string())
+            self.cache.append(self.write_state())
 
         elif self._cache_state is CacheState.READ:
             model_state_of_step_string = self.cache[self.step_number]
-            self.load_state_from_string(model_state_of_step_string)
+            self.load_state(model_state_of_step_string)
 
             # after reading the last step: stop simulation
             if self.step_number == len(self.cache) - 1:
