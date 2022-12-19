@@ -13,43 +13,47 @@ from enum import Enum
 import json
 
 from mesa import Model
-from mesa.datacollection import DataCollector
 
 # mypy
-from typing import Any, List
+from typing import List
 
 
 class CacheState(Enum):
-    INACTIVE = 1,
-    WRITING = 2,
-    READING = 3
+    WRITING = 1,
+    READING = 2
 
 
 @staticmethod
 def _write_cache_file(cache_file_path: path, cache_data: List[str]) -> None:
-    print("TODO")
+    json.dump(cache_data, cache_file_path)
+    # todo: add file compression
 
 
 @staticmethod
 def _read_cache_file(cache_file_path: path) -> List[str]:
-    return ["TODO"]
+    return json.load(cache_file_path)
 
 
 @staticmethod
 def _write_complete_state_to_json_string(model: Model) -> str:
-    return json.dumps(model.__dict__)
+    model_dict_copy = model.__dict__.copy()
+    # remove random because it is not JSON serializable
+    model_dict_copy["random"] = None
+    return json.dumps(model_dict_copy)
 
 
 @staticmethod
 def _load_complete_state_from_json_string(state_json_string: str, model: Model) -> None:
+    existing_random = model.random
     state_dict = json.loads(state_json_string)
     model.__dict__ = state_dict
+    model.random = existing_random
 
 
 class ModelCachable:
     """Class that takes a model and writes its steps to a cache file."""
 
-    def __init__(self, model: Model, cache_file_path: path, cache_state: CacheState = CacheState.INACTIVE) -> None:
+    def __init__(self, model: Model, cache_file_path: path, cache_state: CacheState) -> None:
         """Create a new caching wrapper around an existing mesa model instance.
 
         Attributes:
@@ -58,20 +62,12 @@ class ModelCachable:
         """
         self.model = model
         self.cache_file_path = cache_file_path
-        self.cache_state = cache_state
+        self._cache_state = cache_state
         self.cache: List[str] = []
         self.step_number: int = 0
 
-    def _set_cache_state(self, cache_state: CacheState) -> None:
-        # When no state change: do nothing
-        if self.cache_state == cache_state:
-            print("ModelCachable: requested new cache_state " + str(cache_state) + "but already was in that state. "
-                                                                                   "Doing nothing.")
-            return
-
-        # State change and previously was writing: save cache to file
-        if self.cache_state == CacheState.WRITING:
-            self.write_cache_file()
+        if self._cache_state is CacheState.READING:
+            self.read_cache_file()
 
     def write_state_to_string(self) -> str:
         """Writes the model state to a string. Needs to be compatible with 'load_state_from_string'.
@@ -94,8 +90,8 @@ class ModelCachable:
 
     def read_cache_file(self):
         """Reads the cache from 'cache_file_path' into memory.
-        Can be overwritten to, for example, use a different file format or compression or destination.
-        Needs to remain compatible with 'read_cache_file'
+        Can be overwritten to, for example, use a different file format or compression or location.
+        Needs to remain compatible with 'write_cache_file'
         """
         self.cache = _read_cache_file(self.cache_file_path)
 
@@ -104,16 +100,17 @@ class ModelCachable:
         """
         self.model.run_model()
 
+        # model run finished -> write to cache if in writing state
+        if self._cache_state is CacheState.WRITING:
+            self.write_cache_file()
+
     def step(self) -> None:
         """A single step."""
-        if self.cache_state is CacheState.INACTIVE:
-            self.model.step()
-
-        elif self.cache_state is CacheState.WRITING:
+        if self._cache_state is CacheState.WRITING:
             self.model.step()
             self.cache.append(self.write_state_to_string())
 
-        elif self.cache_state is CacheState.READING:
+        elif self._cache_state is CacheState.READING:
             model_state_of_step_string = self.cache[self.step_number]
             self.load_state_from_string(model_state_of_step_string)
 
