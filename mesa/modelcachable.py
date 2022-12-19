@@ -1,5 +1,5 @@
 """
-A wrapper that extends the model class of Mesa by caching functionality.
+A wrapper that extends the model class of mesa by caching functionality.
 
 Core Objects: ModelCachable
 """
@@ -59,6 +59,7 @@ class ModelCachable:
         Attributes:
             model: mesa model
             cache_file_path: cache file to write to or read from
+            cache_state: whether to replay by reading from the cache or simulate and write to the cache
         """
         self.model = model
         self.cache_file_path = cache_file_path
@@ -70,14 +71,16 @@ class ModelCachable:
             self.read_cache_file()
 
     def write_state_to_string(self) -> str:
-        """Writes the model state to a string. Needs to be compatible with 'load_state_from_string'.
+        """Writes the model state to a string.
         Can be overwritten to write just parts of the state or other custom behavior.
+        Needs to remain compatible with 'load_state_from_string'.
         """
         return _write_complete_state_to_json_string(self.model)
 
     def load_state_from_string(self, state_string: str) -> None:
-        """Loads the model state from the given string. Needs to be compatible with 'write_state_to_string'.
+        """Loads the model state from the given string.
         Can be overwritten to load just parts of the state or other custom behavior.
+        Needs to remain compatible with 'write_state_to_string'.
         """
         _load_complete_state_from_json_string(state_string, self.model)
 
