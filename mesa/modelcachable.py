@@ -16,7 +16,7 @@ import gzip
 from mesa import Model
 
 # mypy
-from typing import Any, List
+from typing import Any, List, Union
 
 
 class CacheState(Enum):
@@ -62,7 +62,7 @@ def _load_complete_state_from_json_string(state_json: Any, model: Model) -> None
 class ModelCachable:
     """Class that takes a model and writes its steps to a cache file."""
 
-    def __init__(self, model: Model, cache_file_path: str, cache_state: CacheState) -> None:
+    def __init__(self, model: Model, cache_file_path: Union[str, Path], cache_state: CacheState) -> None:
         """Create a new caching wrapper around an existing mesa model instance.
 
         Attributes:
@@ -119,7 +119,6 @@ class ModelCachable:
 
     def step(self) -> None:
         """A single step."""
-        print("step")
         if self._cache_state is CacheState.WRITE:
             self.model.step()
             self.cache.append(self.write_state_to_string())
