@@ -24,7 +24,6 @@ class CacheState(Enum):
     READ = 2
 
 
-@staticmethod
 def _write_cache_file(cache_file_path: Path, cache_data: List[Any]) -> None:
     """Default function for writing the given cache data to the cache file.
     Used by ModelCachable if not replaced by a custom write function.
@@ -34,29 +33,12 @@ def _write_cache_file(cache_file_path: Path, cache_data: List[Any]) -> None:
         pickle.dump(cache_data, file)
 
 
-@staticmethod
 def _read_cache_file(cache_file_path: Path) -> List[Any]:
     """Default function for reading the cache data from the cache file.
     Used by ModelCachable if not replaced by a custom read function.
     Expects that gzip and pickle have been used to write the file."""
     with gzip.open(cache_file_path, 'rb') as file:
         return pickle.load(file)
-
-
-@staticmethod
-def _write_complete_state_pickle_output(model: Model) -> Any:
-    """Default function for writing the current model state to the output.
-    Used by ModelCachable if not replaced by a custom write function.
-    Uses pickle to dump the complete model.__dict__ to the output."""
-    return pickle.dumps(model.__dict__)
-
-
-@staticmethod
-def _load_complete_state_from_pickle_input(state_json: Any, model: Model) -> None:
-    """Default function for reading the current model state from an input.
-    Used by ModelCachable if not replaced by a custom read function.
-    Expects that the given input is the model.__dict__ dumped by pickle."""
-    model.__dict__ = pickle.loads(state_json)
 
 
 class ModelCachable:
@@ -79,19 +61,19 @@ class ModelCachable:
         if self._cache_state is CacheState.READ:
             self.read_cache_file()
 
-    def write_state(self) -> Any:
-        """Writes the model state to a string.
+    def serialize_state(self) -> Any:
+        """Serializes the model state.
         Can be overwritten to write just parts of the state or other custom behavior.
-        Needs to remain compatible with 'load_state_from_string'.
+        Needs to remain compatible with 'deserialize_state'.
         """
-        return _write_complete_state_pickle_output(self.model)
+        return pickle.dumps(self.model.__dict__)
 
-    def load_state(self, state_string: Any) -> None:
-        """Loads the model state from the given string.
+    def deserialize_state(self, state: Any) -> None:
+        """Deserializes the model state from the given input.
         Can be overwritten to load just parts of the state or other custom behavior.
-        Needs to remain compatible with 'write_state_to_string'.
+        Needs to remain compatible with 'serialize_state'.
         """
-        _load_complete_state_from_pickle_input(state_string, self.model)
+        self.model.__dict__ = pickle.loads(state)
 
     def write_cache_file(self):
         """Writes the cache from memory to 'cache_file_path'.
@@ -121,11 +103,11 @@ class ModelCachable:
         """A single step."""
         if self._cache_state is CacheState.WRITE:
             self.model.step()
-            self.cache.append(self.write_state())
+            self.cache.append(self.serialize_state())
 
         elif self._cache_state is CacheState.READ:
             model_state_of_step_string = self.cache[self.step_number]
-            self.load_state(model_state_of_step_string)
+            self.deserialize_state(model_state_of_step_string)
 
             # after reading the last step: stop simulation
             if self.step_number == len(self.cache) - 1:
