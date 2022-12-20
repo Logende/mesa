@@ -66,16 +66,16 @@ class ModelCachable:
         self.run_finished = False
 
         if self._cache_state is CacheState.READ:
-            self.read_cache_file()
+            self._read_cache_file()
 
-    def serialize_state(self) -> Any:
+    def _serialize_state(self) -> Any:
         """Serializes the model state.
         Can be overwritten to write just parts of the state or other custom behavior.
         Needs to remain compatible with 'deserialize_state'.
         """
         return dill.dumps(self.model.__dict__)
 
-    def deserialize_state(self, state: Any) -> None:
+    def _deserialize_state(self, state: Any) -> None:
         """Deserializes the model state from the given input.
         Can be overwritten to load just parts of the state or other custom behavior.
         Needs to remain compatible with 'serialize_state'.
@@ -90,7 +90,7 @@ class ModelCachable:
         _write_cache_file(self.cache_file_path, self.cache)
         print("Wrote ModelCachable cache file to " + str(self.cache_file_path))
 
-    def read_cache_file(self) -> None:
+    def _read_cache_file(self) -> None:
         """Reads the cache from 'cache_file_path' into memory.
         Can be overwritten to, for example, use a different file format or compression or location.
         Needs to remain compatible with 'write_cache_file'
@@ -123,10 +123,10 @@ class ModelCachable:
         """A single step."""
         if self._cache_state is CacheState.WRITE:
             self.model.step()
-            self.step_write_to_cache()
+            self._step_write_to_cache()
 
         elif self._cache_state is CacheState.READ:
-            self.step_read_from_cache()
+            self._step_read_from_cache()
 
             # after reading the last step: stop simulation
             if self.step_count == len(self.cache) - 1:
@@ -134,16 +134,16 @@ class ModelCachable:
 
         self.step_count = self.step_count + 1
 
-    def step_write_to_cache(self) -> None:
+    def _step_write_to_cache(self) -> None:
         """Is performed for every step, when 'cache_state' is 'WRITE'. Serializes the current state of the model and
         adds it to the cache (which is a list that contains the state for each performed step)."""
-        self.cache.append(self.serialize_state())
+        self.cache.append(self._serialize_state())
 
-    def step_read_from_cache(self) -> None:
+    def _step_read_from_cache(self) -> None:
         """Is performed for every step, when 'cache_state' is 'READ'. Reads the next state from the cache, deserializes
         it and then updates the model state to this new state."""
         serialized_state = self.cache[self.step_count]
-        self.deserialize_state(serialized_state)
+        self._deserialize_state(serialized_state)
 
     def __getattr__(self, item):
         """Act as proxy: forward all attributes (including function calls) from actual model."""
@@ -166,47 +166,47 @@ class ModelCachableOptimized(ModelCachable):
         self.precision = precision
         self.compress_each_step = compress_each_step
 
-    def step_write_to_cache(self) -> None:
+    def _step_write_to_cache(self) -> None:
         """Is performed for every step, when 'cache_state' is 'WRITE'. Serializes the current state of the model and
         adds it to the cache (which is a list that contains the state for each performed step).
         If precision is >1, only every precision-th step is stored in the cache."""
         # Cache only every nth step
         if (self.step_count + 1) % self.precision == 0:
-            super().step_write_to_cache()
+            super()._step_write_to_cache()
 
-    def compress(self, data: Any) -> Any:
+    def _compress(self, data: Any) -> Any:
         """Compress function that is used if the setting 'compress_each_step' is True. Can be overwritten to use
         a different compression algorithm."""
         return gzip.compress(data)
 
-    def decompress(self, data: Any) -> Any:
+    def _decompress(self, data: Any) -> Any:
         """Decompress function that is used if the setting 'compress_each_step' is True. Can be overwritten to use
         a different decompression algorithm."""
         return gzip.decompress(data)
 
-    def serialize_state(self) -> Any:
+    def _serialize_state(self) -> Any:
         """Serializes the model state.
         Can be overwritten to write just parts of the state or other custom behavior.
         Needs to remain compatible with 'deserialize_state'.
         """
-        dump = super().serialize_state()
+        dump = super()._serialize_state()
         if self.compress_each_step:
-            dump = self.compress(dump)
+            dump = self._compress(dump)
         return dump
 
-    def deserialize_state(self, state: Any) -> None:
+    def _deserialize_state(self, state: Any) -> None:
         """Deserializes the model state from the given input.
         Can be overwritten to load just parts of the state or other custom behavior.
         Needs to remain compatible with 'serialize_state'.
         """
         if self.compress_each_step:
-            state = self.decompress(state)
-        super().deserialize_state(state)
+            state = self._decompress(state)
+        super()._deserialize_state(state)
 
 
 class ModelCachableStreaming(ModelCachableOptimized):
     """Decorator for ModelCachableOptimized, that uses buffered streams for reading and writing the cache, instead
-    of keeping the complete cache in memory."""
+    of keeping the complete cache in memory. Useful when the cache is large."""
 
     def __init__(self, model: Model, cache_file_path: Union[str, Path], cache_state: CacheState,
                  precision: int = 1, compress_each_step: bool = True):
@@ -229,14 +229,14 @@ class ModelCachableStreaming(ModelCachableOptimized):
         super().finish_run()
         self.cache_file_stream.close()
 
-    def step_write_to_cache(self) -> None:
+    def _step_write_to_cache(self) -> None:
         """Is performed for every step, when 'cache_state' is 'WRITE'. Serializes the current state of the model and
         writes it to the cache file stream."""
-        serialized_state: bytes = self.serialize_state()
+        serialized_state: bytes = self._serialize_state()
         _stream_write_next_chunk_size(self.cache_file_stream, len(serialized_state))
         self.cache_file_stream.write(serialized_state)
 
-    def step_read_from_cache(self) -> None:
+    def _step_read_from_cache(self) -> None:
         """Is performed for every step, when 'cache_state' is 'READ'. Reads the next state from the cache file stream,
         deserializes it and then updates the model state to this new state."""
         chunk_length = _stream_read_next_chunk_size(self.cache_file_stream)
@@ -245,7 +245,7 @@ class ModelCachableStreaming(ModelCachableOptimized):
             self.model.running = False
         else:
             serialized_state = self.cache_file_stream.read(chunk_length)
-            self.deserialize_state(serialized_state)
+            self._deserialize_state(serialized_state)
 
     def _write_cache_file(self) -> None:
         """Overwrites the '_write_cache_file' function of the ModelCachable class. As the file content is written
@@ -256,7 +256,7 @@ class ModelCachableStreaming(ModelCachableOptimized):
         # end cache file with a chunk size of 0, to make EOF detectable
         _stream_write_next_chunk_size(self.cache_file_stream, 0)
 
-    def read_cache_file(self) -> None:
+    def _read_cache_file(self) -> None:
         """Overwrites the '_read_cache_file' function of the ModelCachable class. As the file content is read from
         the stream during each step, this function does not have to do anything in advance."""
         return

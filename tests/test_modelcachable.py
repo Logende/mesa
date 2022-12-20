@@ -1,5 +1,7 @@
 import gzip
 import pickle
+import lzma
+import dill
 
 from mesa.modelcachable import Model, ModelCachable, CacheState, ModelCachableOptimized, ModelCachableStreaming, \
     _stream_read_next_chunk_size
@@ -11,6 +13,7 @@ from pathlib import Path
 
 
 class ModelFibonacci(Model):
+    """Simple fibonacci model to be used by the tests."""
     previous = 0
     current = 1
 
@@ -26,8 +29,44 @@ class ModelFibonacci(Model):
 
 
 class ModelFibonacciForReplay(ModelFibonacci):
+    """Same as the fibonacci model, except it does not support simulating a step and instead will raise an Exception
+    if simulating a step is attempted. To be used by tests to verify that replay from cache does not simply simulate
+    again, but instead actually reads from the cache."""
     def step(self):
         raise Exception("This function is not supposed to be called during replay.")
+
+
+class ModelCachableCustomFileHandling(ModelCachable):
+    """ModelCachable with custom write and read implementation for the cache file. Uses a different compression
+    algorithm than the default ModelCachable, which should perform slower but result in stronger compression.
+    Used in a test to demonstrate the possibility of writing custom file handling."""
+
+    def _write_cache_file(self) -> None:
+        # overwrite to use different compression algorithm
+        with lzma.open(self.cache_file_path, 'wb') as file:
+            dill.dump(self.cache, file)
+
+    def _read_cache_file(self) -> None:
+        # overwrite to use different compression algorithm
+        with lzma.open(self.cache_file_path, 'rb') as file:
+            self.cache = dill.load(file)
+
+
+class ModelCachableCustomSerialization(ModelCachable):
+    """ModelCachable with custom state serialization and deserialization implementation for the cache.
+    Instead of storing the complete model instance state, it stores just the values necessary for replay.
+    In case of ModelFibonacci, storing the 'current' value is enough for replay."""
+
+    def _serialize_state(self) -> int:
+        # Store just the current value, because this is sufficient for replay. Note that for other models,
+        # one could also store a list of selected attributes or anything else that is sufficient for replay.
+        return self.model.current
+
+    def _deserialize_state(self, state: int) -> None:
+        # As the serialization (see function above) stores just the current value, the state that the deserialization
+        # function receives is exactly this one value. So, to deserialize, it suffices to transfer that state (current
+        # model value) to the model instance that is used for replay.
+        self.model.current = state
 
 
 class TestModelCachable(unittest.TestCase):
@@ -62,9 +101,9 @@ class TestModelCachable(unittest.TestCase):
 
             assert cache_file_path.is_file()
 
-            # assert that file created by default ModelCachable can be opened using gzip and then pickle
+            # assert that file created by default ModelCachable can be opened using gzip and then dill
             with gzip.open(cache_file_path, 'rb') as file:
-                pickle.load(file)
+                dill.load(file)
 
     def test_compare_replay_with_simulation(self):
         with TemporaryDirectory() as tmp_dir_path:
@@ -127,12 +166,14 @@ class TestModelCachable(unittest.TestCase):
         with TemporaryDirectory() as tmp_dir_path:
             cache_file_path = Path(tmp_dir_path).joinpath("cache_file")
 
+            # Simulate
             model_simulate = ModelFibonacci()
             model_simulate = ModelCachable(model_simulate, cache_file_path, CacheState.WRITE)
             model_simulate.run_model()
             final_value_simulation = model_simulate.current
             final_step_simulation = model_simulate.step_count
 
+            # Replay
             model_replay = ModelFibonacciForReplay()
             model_replay = ModelCachable(model_replay, cache_file_path, CacheState.READ)
             model_replay.run_model()
@@ -141,6 +182,52 @@ class TestModelCachable(unittest.TestCase):
 
             assert final_step_replay == final_step_simulation
             assert final_value_replay == final_value_simulation
+
+    def test_custom_cache_file_handling(self):
+        with TemporaryDirectory() as tmp_dir_path:
+            cache_file_path_1 = Path(tmp_dir_path).joinpath("cache_file_1")
+            cache_file_path_2 = Path(tmp_dir_path).joinpath("cache_file_2")
+
+            # Simulate with regular ModelCachable
+            model_1 = ModelFibonacci()
+            model_1 = ModelCachable(model_1, cache_file_path_1, CacheState.WRITE)
+            model_1.run_model()
+            final_value_1 = model_1.current
+
+            # Simulate with custom ModelCachable that uses stronger compression
+            model_2 = ModelFibonacci()
+            model_2 = ModelCachableCustomFileHandling(model_2, cache_file_path_2, CacheState.WRITE)
+            model_2.run_model()
+            final_value_2 = model_2.current
+
+            # Make sure both models behaved the same way
+            assert final_value_1 == final_value_2
+
+            # Cache file 2 should be smaller than cache file 1 due to stronger compression
+            assert cache_file_path_2.stat().st_size * 1.1 < cache_file_path_1.stat().st_size
+
+    def test_custom_serialization(self):
+        with TemporaryDirectory() as tmp_dir_path:
+            cache_file_path_1 = Path(tmp_dir_path).joinpath("cache_file_1")
+            cache_file_path_2 = Path(tmp_dir_path).joinpath("cache_file_2")
+
+            # Simulate with regular ModelCachable
+            model_1 = ModelFibonacci()
+            model_1 = ModelCachable(model_1, cache_file_path_1, CacheState.WRITE)
+            model_1.run_model()
+            final_value_1 = model_1.current
+
+            # Simulate with custom ModelCachable that caches only parts of the model state that are required for replay
+            model_2 = ModelFibonacci()
+            model_2 = ModelCachableCustomSerialization(model_2, cache_file_path_2, CacheState.WRITE)
+            model_2.run_model()
+            final_value_2 = model_2.current
+
+            # Make sure both models behaved the same way
+            assert final_value_1 == final_value_2
+
+            # Cache file 2 should be a lot smaller than cache file 1 due to storing fewer data
+            assert cache_file_path_2.stat().st_size * 35 < cache_file_path_1.stat().st_size
 
     def test_model_cachable_optimized_precision(self):
         for precision in (1, 2, 3, 8):
@@ -182,14 +269,14 @@ class TestModelCachable(unittest.TestCase):
             model_no_compression = ModelCachableOptimized(model_no_compression, cache_file_path, CacheState.WRITE,
                                                           compress_each_step=False)
             model_no_compression.step()
-            state_no_compression = model_no_compression.serialize_state()
+            state_no_compression = model_no_compression._serialize_state()
 
             # Simulate with compression
             model_compression = ModelFibonacci()
             model_compression = ModelCachableOptimized(model_compression, cache_file_path, CacheState.WRITE,
                                                        compress_each_step=True)
             model_compression.step()
-            state_compression = model_compression.serialize_state()
+            state_compression = model_compression._serialize_state()
 
             # note that the compressed state is only slightly smaller for the example model used here, because it
             # is very small and contains almost no redundancy
@@ -218,7 +305,7 @@ class TestModelCachable(unittest.TestCase):
             serialized_state = model_replay.cache_file_stream.read(chunk_length)
 
             # 3. set model state to deserialized chunk state
-            model_replay.deserialize_state(serialized_state)
+            model_replay._deserialize_state(serialized_state)
 
             # expect that the simulation of 1 step has the same value as replay of 1 chunk
             value_replay = model_replay.current
