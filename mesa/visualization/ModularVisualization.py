@@ -106,6 +106,7 @@ import tornado.gen
 import webbrowser
 
 from mesa.visualization.UserParam import UserSettableParameter, UserParam
+from mesa.modelcachable import ModelCachable, ModelCachableOptimized, CacheState
 
 # Suppress several pylint warnings for this file.
 # Attributes being defined outside of init is a Tornado feature.
@@ -225,6 +226,7 @@ class SocketHandler(tornado.websocket.WebSocketHandler):
 
         if msg["type"] == "get_step":
             if not self.application.model.running:
+                self.application.model.finish_run()
                 self.write_message({"type": "end"})
             else:
                 self.application.model.step()
@@ -382,6 +384,7 @@ class ModularServer(tornado.web.Application):
         # We specify the `running` attribute here so that the user doesn't have
         # to define it explicitly in their model's __init__.
         self.model.running = True
+        self.model = ModelCachable(self.model, cache_file_path="my_path.cache",cache_state=CacheState.WRITE)
 
     def render_model(self):
         """Turn the current state of the model into a dictionary of
