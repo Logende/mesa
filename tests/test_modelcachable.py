@@ -162,12 +162,11 @@ class TestModelCachable(unittest.TestCase):
                                                       compress_each_step=False)
 
                 # The replay cache has only every precision-th step. E.g. precision is 2: only every second step.
-                # Note that the first step is always being cached, which results in the following cache sizes:
                 # 100 steps, precision 1 -> 100 cache size
                 # 100 steps, precision 2 -> 50 cache size
-                # 100 steps, precision 3 -> 34 cache size
-                # 100 steps, precision 8 -> 13 cache size
-                expected_replay_steps = 1 + (step_count - 1) // precision
+                # 100 steps, precision 3 -> 33 cache size
+                # 100 steps, precision 8 -> 12 cache size
+                expected_replay_steps = step_count // precision
 
                 assert len(model_replay.cache) == expected_replay_steps
 
@@ -177,7 +176,6 @@ class TestModelCachable(unittest.TestCase):
     def test_model_cachable_optimized_compress_steps(self):
         with TemporaryDirectory() as tmp_dir_path:
             cache_file_path = Path(tmp_dir_path).joinpath("cache_file")
-            step_count = 100
 
             # Simulate without compression
             model_no_compression = ModelFibonacci()
