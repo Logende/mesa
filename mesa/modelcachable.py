@@ -7,16 +7,19 @@ Core Objects: ModelCachable
 # Remove this __future__ import once the oldest supported Python is 3.10
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from enum import Enum
 
 import pickle
 import gzip
+import io
+import sys
 
 from mesa import Model
 
 # mypy
-from typing import Any, List, Union
+from typing import Any, List, Union, IO
 
 
 class CacheState(Enum):
@@ -41,6 +44,15 @@ def _read_cache_file(cache_file_path: Path) -> List[Any]:
         return pickle.load(file)
 
 
+def _stream_write_next_chunk_size(stream: IO, size: int):
+    chunk_length_bytes = size.to_bytes(length=8, byteorder='little', signed=False)
+    stream.write(chunk_length_bytes)
+
+
+def _stream_read_next_chunk_size(stream):
+    return int.from_bytes(stream.read(8), byteorder='little', signed=False)
+
+
 class ModelCachable:
     """Class that takes a model and writes its steps to a cache file or reads them from a cache file."""
 
@@ -57,6 +69,7 @@ class ModelCachable:
         self._cache_state = cache_state
         self.cache: List[Any] = []
         self.step_count: int = 0
+        self.run_finished = False
 
         if self._cache_state is CacheState.READ:
             self.read_cache_file()
@@ -75,7 +88,7 @@ class ModelCachable:
         """
         self.model.__dict__ = pickle.loads(state)
 
-    def write_cache_file(self):
+    def _write_cache_file(self):
         """Writes the cache from memory to 'cache_file_path'.
         Can be overwritten to, for example, use a different file format or compression or destination.
         Needs to remain compatible with 'read_cache_file'
@@ -95,19 +108,24 @@ class ModelCachable:
         """
         self.model.run_model()
 
+        self.finish_run()
+
+    def finish_run(self) -> None:
+        if self.run_finished:
+            raise RuntimeError("ModelCachable: Can not finish a run that was already finished.")
+
         # model run finished -> write to cache if in writing state
         if self._cache_state is CacheState.WRITE:
-            self.write_cache_file()
+            self._write_cache_file()
 
     def step(self) -> None:
         """A single step."""
         if self._cache_state is CacheState.WRITE:
             self.model.step()
-            self.cache_step()
+            self.step_write_to_cache()
 
         elif self._cache_state is CacheState.READ:
-            model_state_of_step_string = self.cache[self.step_count]
-            self.deserialize_state(model_state_of_step_string)
+            self.step_read_from_cache()
 
             # after reading the last step: stop simulation
             if self.step_count == len(self.cache) - 1:
@@ -115,16 +133,19 @@ class ModelCachable:
 
         self.step_count = self.step_count + 1
 
-    def cache_step(self):
+    def step_write_to_cache(self):
         self.cache.append(self.serialize_state())
+
+    def step_read_from_cache(self):
+        serialized_state = self.cache[self.step_count]
+        self.deserialize_state(serialized_state)
 
     def __getattr__(self, item):
         """Act as proxy: forward all attributes (including function calls) from actual model."""
         return self.model.__getattribute__(item)
 
 
-class ModelCachableLarge(ModelCachable):
-
+class ModelCachableOptimized(ModelCachable):
     def __init__(self, model: Model, cache_file_path: Union[str, Path], cache_state: CacheState,
                  precision: int = 1, compress_each_step: bool = True):
         super().__init__(model, cache_file_path, cache_state)
@@ -161,18 +182,46 @@ class ModelCachableLarge(ModelCachable):
             state = self.decompress(state)
         super().deserialize_state(state)
 
-    def write_cache_file(self):
-        """Writes the cache from memory to 'cache_file_path'.
-        Can be overwritten to, for example, use a different file format or compression or destination.
-        Needs to remain compatible with 'read_cache_file'
-        """
-        _write_cache_file(self.cache_file_path, self.cache)
-        print("Wrote ModelCachable cache file to " + str(self.cache_file_path))
-        # TODO: write to filestream / append on existing file with every step instead of writing everything here
+
+class ModelCachableStreaming(ModelCachableOptimized):
+
+    def __init__(self, model: Model, cache_file_path: Union[str, Path], cache_state: CacheState,
+                 precision: int = 1, compress_each_step: bool = True):
+        super().__init__(model, cache_file_path, cache_state, precision, compress_each_step)
+
+        if cache_state is CacheState.WRITE:
+            if self.cache_file_path.exists():
+                print("ModelCachableLarge: cache file (path='" + str(self.cache_file_path) + "') already exists. "
+                                                                                             "Deleting it.")
+                os.remove(cache_file_path)
+            self.cache_file_stream = io.open(cache_file_path, 'wb')
+
+        elif cache_state is CacheState.READ:
+            self.cache_file_stream = io.open(cache_file_path, 'rb')
+
+    def finish_run(self) -> None:
+        super().finish_run()
+        self.cache_file_stream.close()
+
+    def step_write_to_cache(self):
+        serialized_state: bytes = self.serialize_state()
+        _stream_write_next_chunk_size(self.cache_file_stream, len(serialized_state))
+        self.cache_file_stream.write(serialized_state)
+
+    def step_read_from_cache(self):
+        chunk_length = _stream_read_next_chunk_size(self.cache_file_stream)
+        if chunk_length == 0:
+            print("ModelCachableLarge: reached end of cache file stream.")
+            self.model.running = False
+        else:
+            serialized_state = self.cache_file_stream.read(chunk_length)
+            self.deserialize_state(serialized_state)
+
+    def _write_cache_file(self):
+        if self._cache_state is CacheState.WRITE:
+            # end cache file with a chunk size of 0, to make EOF detectable
+            _stream_write_next_chunk_size(self.cache_file_stream, 0)
 
     def read_cache_file(self):
-        """Reads the cache from 'cache_file_path' into memory.
-        Can be overwritten to, for example, use a different file format or compression or location.
-        Needs to remain compatible with 'write_cache_file'
-        """
-        self.cache = _read_cache_file(self.cache_file_path)
+        # nothing to do in advance as a stream is used to read on the go
+        return
