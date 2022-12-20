@@ -1,3 +1,6 @@
+import gzip
+import pickle
+
 from mesa.modelcachable import Model, ModelCachable, CacheState
 
 from unittest.mock import MagicMock
@@ -38,6 +41,24 @@ class TestModelCachable(unittest.TestCase):
 
         # Exception when trying to construct ModelCachable with CacheState.READ and non-existing cache file
         self.assertRaises(Exception, ModelCachable, model, "non_existing_file", CacheState.READ)
+
+    def test_cache_file_creation(self):
+        with TemporaryDirectory() as tmp_dir_path:
+            cache_file_path = Path(tmp_dir_path).joinpath("cache_file")
+
+            assert not cache_file_path.is_file() and not cache_file_path.exists()
+            # Simulate
+            model_simulate = ModelFibonacci()
+            model_simulate = ModelCachable(model_simulate, cache_file_path, CacheState.WRITE)
+            for i in range(10):
+                model_simulate.step()
+            model_simulate.write_cache_file()
+
+            assert cache_file_path.is_file()
+
+            # assert that file created by default ModelCachable can be opened using gzip and then pickle
+            with gzip.open(cache_file_path, 'rb') as file:
+                pickle.load(file)
 
     def test_compare_replay_with_simulation(self):
         with TemporaryDirectory() as tmp_dir_path:
