@@ -10,7 +10,7 @@ from pathlib import Path
 from enum import Enum
 from typing import Any, List, Union, IO
 
-import pickle
+import dill
 import gzip
 
 from mesa import Model
@@ -24,18 +24,18 @@ class CacheState(Enum):
 def _write_cache_file(cache_file_path: Path, cache_data: List[Any]) -> None:
     """Default function for writing the given cache data to the cache file.
     Used by ModelCachable if not replaced by a custom write function.
-    Uses pickle to dump the data into the file.
+    Uses dill to dump the data into the file.
     Uses gzip for compression."""
     with gzip.open(cache_file_path, 'wb') as file:
-        pickle.dump(cache_data, file)
+        dill.dump(cache_data, file)
 
 
 def _read_cache_file(cache_file_path: Path) -> List[Any]:
     """Default function for reading the cache data from the cache file.
     Used by ModelCachable if not replaced by a custom read function.
-    Expects that gzip and pickle have been used to write the file."""
+    Expects that gzip and dill have been used to write the file."""
     with gzip.open(cache_file_path, 'rb') as file:
-        return pickle.load(file)
+        return dill.load(file)
 
 
 def _stream_write_next_chunk_size(stream: IO, size: int):
@@ -73,14 +73,14 @@ class ModelCachable:
         Can be overwritten to write just parts of the state or other custom behavior.
         Needs to remain compatible with 'deserialize_state'.
         """
-        return pickle.dumps(self.model.__dict__)
+        return dill.dumps(self.model.__dict__)
 
     def deserialize_state(self, state: Any) -> None:
         """Deserializes the model state from the given input.
         Can be overwritten to load just parts of the state or other custom behavior.
         Needs to remain compatible with 'serialize_state'.
         """
-        self.model.__dict__ = pickle.loads(state)
+        self.model.__dict__ = dill.loads(state)
 
     def _write_cache_file(self) -> None:
         """Writes the cache from memory to 'cache_file_path'.
