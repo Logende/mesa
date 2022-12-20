@@ -1,5 +1,5 @@
 """
-A wrapper that extends the model class of mesa by caching functionality.
+A decorator that wraps the model class of mesa and extends it by caching functionality.
 
 Core Objects: ModelCachable
 """
@@ -103,7 +103,7 @@ class ModelCachable:
         """A single step."""
         if self._cache_state is CacheState.WRITE:
             self.model.step()
-            self.cache.append(self.serialize_state())
+            self.cache_step()
 
         elif self._cache_state is CacheState.READ:
             model_state_of_step_string = self.cache[self.step_count]
@@ -115,6 +115,64 @@ class ModelCachable:
 
         self.step_count = self.step_count + 1
 
+    def cache_step(self):
+        self.cache.append(self.serialize_state())
+
     def __getattr__(self, item):
         """Act as proxy: forward all attributes (including function calls) from actual model."""
         return self.model.__getattribute__(item)
+
+
+class ModelCachableLarge(ModelCachable):
+
+    def __init__(self, model: Model, cache_file_path: Union[str, Path], cache_state: CacheState,
+                 precision: int = 1, compress_each_step: bool = True):
+        super().__init__(model, cache_file_path, cache_state)
+        self.precision = precision
+        self.compress_each_step = compress_each_step
+
+    def cache_step(self):
+        # Cache only every nth step
+        if self.step_count % self.precision == 0:
+            super().cache_step()
+
+    def compress(self, data: bytes):
+        return gzip.compress(data)
+
+    def decompress(self, data: bytes):
+        return gzip.decompress(data)
+
+    def serialize_state(self) -> Any:
+        """Serializes the model state.
+        Can be overwritten to write just parts of the state or other custom behavior.
+        Needs to remain compatible with 'deserialize_state'.
+        """
+        dump = super().serialize_state()
+        if self.compress_each_step:
+            dump = self.compress(dump)
+        return dump
+
+    def deserialize_state(self, state: Any) -> None:
+        """Deserializes the model state from the given input.
+        Can be overwritten to load just parts of the state or other custom behavior.
+        Needs to remain compatible with 'serialize_state'.
+        """
+        if self.compress_each_step:
+            state = self.decompress(state)
+        super().deserialize_state(state)
+
+    def write_cache_file(self):
+        """Writes the cache from memory to 'cache_file_path'.
+        Can be overwritten to, for example, use a different file format or compression or destination.
+        Needs to remain compatible with 'read_cache_file'
+        """
+        _write_cache_file(self.cache_file_path, self.cache)
+        print("Wrote ModelCachable cache file to " + str(self.cache_file_path))
+        # TODO: write to filestream / append on existing file with every step instead of writing everything here
+
+    def read_cache_file(self):
+        """Reads the cache from 'cache_file_path' into memory.
+        Can be overwritten to, for example, use a different file format or compression or location.
+        Needs to remain compatible with 'write_cache_file'
+        """
+        self.cache = _read_cache_file(self.cache_file_path)
