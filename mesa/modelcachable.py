@@ -106,7 +106,11 @@ class ModelCachable:
     def run_model(self) -> None:
         """Run the model until the end condition is reached.
         """
-        self.model.run_model()
+        # self.model.run_model()
+        # Right now if someone has a custom run_model function, they need to overwrite this function too
+
+        while self.model.running:
+            self.step()
 
         self.finish_run()
 
