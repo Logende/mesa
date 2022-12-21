@@ -50,17 +50,23 @@ def _stream_read_next_chunk_size(stream):
 class ModelCachable:
     """Class that takes a model and writes its steps to a cache file or reads them from a cache file."""
 
-    def __init__(self, model: Model, cache_file_path: Union[str, Path], cache_state: CacheState) -> None:
+    def __init__(self, model: Model, cache_file_path: Union[str, Path], cache_state: CacheState,
+                 cache_step_rate: int = 1) -> None:
         """Create a new caching wrapper around an existing mesa model instance.
 
         Attributes:
             model: mesa model
             cache_file_path: cache file to write to or read from
             cache_state: whether to replay by reading from the cache or simulate and write to the cache
+            cache_step_rate: only every n-th step is cached. If it is 1, every step is cached. If it is 2,
+            only every second step is cached and so on. Increasing 'cache_step_rate' will reduce cache size and
+            increase replay performance by skipping the steps inbetween every n-th step.
         """
         self.model = model
         self.cache_file_path = Path(cache_file_path)
         self._cache_state = cache_state
+        self._cache_step_rate = cache_step_rate
+
         self.cache: List[Any] = []
         self.step_count: int = 0
         self.run_finished = False
@@ -72,12 +78,20 @@ class ModelCachable:
         """Serializes the model state.
         Can be overwritten to write just parts of the state or other custom behavior.
         Needs to remain compatible with 'deserialize_state'.
+
+        Note that for large model states, it might make sense to add compression during the serialization.
+        That way the size of the cache in memory can be reduced. Additionally, while, by default, the resulting output
+        cache file is compressed too (see '_write_cache_file), this is not the case, when using other file handling
+        behavior, such as writing to a buffered file stream during every step (see 'ModelCachableStreaming'). For such
+        use-cases, a way to reduce the size of the resulting output cache file is to compress the individual steps. That
+        way, for example, reading the cache from the file stream step by step remains possible, without having to
+        load the complete cache into memory. This is not possible, when the complete output file is compressed.
         """
         return dill.dumps(self.model.__dict__)
 
     def _deserialize_state(self, state: Any) -> None:
         """Deserializes the model state from the given input.
-        Can be overwritten to load just parts of the state or other custom behavior.
+        Can be overwritten to load just parts of the state, decompress data, or other custom behavior.
         Needs to remain compatible with 'serialize_state'.
         """
         self.model.__dict__ = dill.loads(state)
@@ -113,17 +127,22 @@ class ModelCachable:
         file can be performed. Automatically called by the 'run_model' function after the run, but needs to be
         manually called, when calling the steps manually."""
         if self.run_finished:
-            raise RuntimeError("ModelCachable: Can not finish a run that was already finished.")
+            print("ModelCachable: tried to finish run that was already finished. Doing nothing.")
+            return
 
         # model run finished -> write to cache if in writing state
         if self._cache_state is CacheState.WRITE:
             self._write_cache_file()
 
+        self.run_finished = True
+
     def step(self) -> None:
         """A single step."""
         if self._cache_state is CacheState.WRITE:
             self.model.step()
-            self._step_write_to_cache()
+            # Cache only every n-th step
+            if (self.step_count + 1) % self._cache_step_rate == 0:
+                self._step_write_to_cache()
 
         elif self._cache_state is CacheState.READ:
             self._step_read_from_cache()
@@ -150,67 +169,13 @@ class ModelCachable:
         return self.model.__getattribute__(item)
 
 
-class ModelCachableOptimized(ModelCachable):
-    """Extends ModelCachable by the optional functionality of compressing the state data of each individual step and
-    of decreasing the replay precision by only caching every nth step. This makes it possible to dramatically decrease
-    cache size and increase replay speed for large models.
-
-    Attributes:
-        precision: every precision-th step is cached. If precision=1, every step is cached. If precision=2,
-        only every second step is cached and so on.
-        compress_each_step: whether to compress the state of each step (takes more time but makes cache file smaller)
-    """
-    def __init__(self, model: Model, cache_file_path: Union[str, Path], cache_state: CacheState,
-                 precision: int = 1, compress_each_step: bool = True):
-        super().__init__(model, cache_file_path, cache_state)
-        self.precision = precision
-        self.compress_each_step = compress_each_step
-
-    def _step_write_to_cache(self) -> None:
-        """Is performed for every step, when 'cache_state' is 'WRITE'. Serializes the current state of the model and
-        adds it to the cache (which is a list that contains the state for each performed step).
-        If precision is >1, only every precision-th step is stored in the cache."""
-        # Cache only every nth step
-        if (self.step_count + 1) % self.precision == 0:
-            super()._step_write_to_cache()
-
-    def _compress(self, data: Any) -> Any:
-        """Compress function that is used if the setting 'compress_each_step' is True. Can be overwritten to use
-        a different compression algorithm."""
-        return gzip.compress(data)
-
-    def _decompress(self, data: Any) -> Any:
-        """Decompress function that is used if the setting 'compress_each_step' is True. Can be overwritten to use
-        a different decompression algorithm."""
-        return gzip.decompress(data)
-
-    def _serialize_state(self) -> Any:
-        """Serializes the model state.
-        Can be overwritten to write just parts of the state or other custom behavior.
-        Needs to remain compatible with 'deserialize_state'.
-        """
-        dump = super()._serialize_state()
-        if self.compress_each_step:
-            dump = self._compress(dump)
-        return dump
-
-    def _deserialize_state(self, state: Any) -> None:
-        """Deserializes the model state from the given input.
-        Can be overwritten to load just parts of the state or other custom behavior.
-        Needs to remain compatible with 'serialize_state'.
-        """
-        if self.compress_each_step:
-            state = self._decompress(state)
-        super()._deserialize_state(state)
-
-
-class ModelCachableStreaming(ModelCachableOptimized):
-    """Decorator for ModelCachableOptimized, that uses buffered streams for reading and writing the cache, instead
+class ModelCachableStreaming(ModelCachable):
+    """Decorator for ModelCachableOptimized that uses buffered streams for reading and writing the cache, instead
     of keeping the complete cache in memory. Useful when the cache is large."""
 
     def __init__(self, model: Model, cache_file_path: Union[str, Path], cache_state: CacheState,
-                 precision: int = 1, compress_each_step: bool = True):
-        super().__init__(model, cache_file_path, cache_state, precision, compress_each_step)
+                 cache_step_rate: int = 1):
+        super().__init__(model, cache_file_path, cache_state, cache_step_rate)
 
         if cache_state is CacheState.WRITE:
             if self.cache_file_path.exists():

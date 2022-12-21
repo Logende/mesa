@@ -3,7 +3,7 @@ import pickle
 import lzma
 import dill
 
-from mesa.modelcachable import Model, ModelCachable, CacheState, ModelCachableOptimized, ModelCachableStreaming, \
+from mesa.modelcachable import Model, ModelCachable, CacheState, ModelCachableStreaming, \
     _stream_read_next_chunk_size
 
 from unittest.mock import MagicMock
@@ -32,6 +32,7 @@ class ModelFibonacciForReplay(ModelFibonacci):
     """Same as the fibonacci model, except it does not support simulating a step and instead will raise an Exception
     if simulating a step is attempted. To be used by tests to verify that replay from cache does not simply simulate
     again, but instead actually reads from the cache."""
+
     def step(self):
         raise Exception("This function is not supposed to be called during replay.")
 
@@ -217,6 +218,39 @@ class TestModelCachable(unittest.TestCase):
             assert final_step_replay == final_step_simulation
             assert final_value_replay == final_value_simulation
 
+    def test_cache_step_rate(self):
+        """This test verifies that when using 'cache_step_rate' > 1 the cache will store
+        correspondingly fewer steps. The idea of cache_step_rate is that it enables storing only every n-th step, making
+        it possible to drastically reduce cache size and increase replay performance."""
+        for cache_step_rate in (1, 2, 3, 8):
+            with TemporaryDirectory() as tmp_dir_path:
+                cache_file_path = Path(tmp_dir_path).joinpath("cache_file")
+                step_count = 20
+
+                # Simulate
+                model_simulate = ModelFibonacci()
+                model_simulate = ModelCachable(model_simulate, cache_file_path, CacheState.WRITE,
+                                               cache_step_rate=cache_step_rate)
+                for i in range(step_count):
+                    model_simulate.step()
+                model_simulate.finish_run()
+
+                # Replay
+                model_replay = ModelFibonacciForReplay()
+                model_replay = ModelCachable(model_replay, cache_file_path, CacheState.READ)
+
+                # The replay cache has only every precision-th step. E.g. precision is 2: only every second step.
+                # 100 steps, precision 1 -> 100 cache size
+                # 100 steps, precision 2 -> 50 cache size
+                # 100 steps, precision 3 -> 33 cache size
+                # 100 steps, precision 8 -> 12 cache size
+                expected_replay_steps = step_count // cache_step_rate
+
+                assert len(model_replay.cache) == expected_replay_steps
+
+                model_replay.run_model()
+                assert model_replay.step_count == expected_replay_steps
+
     def test_custom_cache_file_handling(self):
         """This test compares the cache file outputs from ModelCachable versus ModelCachableCustomFileHandling.
         The latter implements custom file handling and uses a stronger compression. The resulting cache file should be
@@ -271,72 +305,6 @@ class TestModelCachable(unittest.TestCase):
 
             # Cache file 2 should be a lot smaller than cache file 1 due to storing fewer data
             assert cache_file_path_2.stat().st_size * 35 < cache_file_path_1.stat().st_size
-
-    def test_model_cachable_optimized_precision(self):
-        """This test uses ModelCachableOptimized. It verifies that when using 'precision' > 1 the cache will store
-        correspondingly fewer steps. The idea of precision is that enables storing only every n-th step, making it
-        possible to drastically reduce cache size and increase replay performance."""
-        for precision in (1, 2, 3, 8):
-            with TemporaryDirectory() as tmp_dir_path:
-                cache_file_path = Path(tmp_dir_path).joinpath("cache_file")
-                step_count = 20
-
-                # Simulate
-                model_simulate = ModelFibonacci()
-                model_simulate = ModelCachableOptimized(model_simulate, cache_file_path, CacheState.WRITE,
-                                                        precision=precision, compress_each_step=False)
-                for i in range(step_count):
-                    model_simulate.step()
-                model_simulate.finish_run()
-
-                # Replay
-                model_replay = ModelFibonacciForReplay()
-                model_replay = ModelCachableOptimized(model_replay, cache_file_path, CacheState.READ,
-                                                      compress_each_step=False)
-
-                # The replay cache has only every precision-th step. E.g. precision is 2: only every second step.
-                # 100 steps, precision 1 -> 100 cache size
-                # 100 steps, precision 2 -> 50 cache size
-                # 100 steps, precision 3 -> 33 cache size
-                # 100 steps, precision 8 -> 12 cache size
-                expected_replay_steps = step_count // precision
-
-                assert len(model_replay.cache) == expected_replay_steps
-
-                model_replay.run_model()
-                assert model_replay.step_count == expected_replay_steps
-
-    def test_model_cachable_optimized_compress_steps(self):
-        """ModelCachableOptimized also has the option of compressing the content of each step.
-        It could be argued that the persisted cache file can already have its own compression provided by the
-        'ModelCachable._write_cache_file' function, making the compression of individual steps somewhat unnecessary.
-        Compressing individual steps, however, can reduce cache size also in memory. Additionally, when using IO
-        streaming functionality to write to the cache file (see 'ModelCachableStreaming') during each individual step,
-        it useful to be able to compress those individual steps that are being persisted. For storage, the resulting
-        cache file could still be compressed again, to reduce size further, but that compression of the complete file
-        would make buffered stream reading from the file impossible. By compressing just individual steps, it remains
-        possible to read the states step by step, without the need of having the complete cache in memory.
-         """
-        with TemporaryDirectory() as tmp_dir_path:
-            cache_file_path = Path(tmp_dir_path).joinpath("cache_file")
-
-            # Simulate without compression
-            model_no_compression = ModelFibonacci()
-            model_no_compression = ModelCachableOptimized(model_no_compression, cache_file_path, CacheState.WRITE,
-                                                          compress_each_step=False)
-            model_no_compression.step()
-            state_no_compression = model_no_compression._serialize_state()
-
-            # Simulate with compression
-            model_compression = ModelFibonacci()
-            model_compression = ModelCachableOptimized(model_compression, cache_file_path, CacheState.WRITE,
-                                                       compress_each_step=True)
-            model_compression.step()
-            state_compression = model_compression._serialize_state()
-
-            # note that the compressed state is only slightly smaller for the example model used here, because it
-            # is very small and contains almost no redundancy
-            assert len(state_compression) * 1.1 < len(state_no_compression)
 
     def test_model_cachable_streaming_chunk_handling(self):
         """This test verifies that the streaming functionality of 'ModelCachableStreaming' works properly:
