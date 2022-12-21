@@ -75,7 +75,7 @@ class ModelCachable:
             self._read_cache_file()
 
     def _serialize_state(self) -> Any:
-        """Serializes the model state.
+        """Serialize the model state.
         Can be overwritten to write just parts of the state or other custom behavior.
         Needs to remain compatible with '_deserialize_state'.
 
@@ -90,14 +90,14 @@ class ModelCachable:
         return dill.dumps(self.model.__dict__)
 
     def _deserialize_state(self, state: Any) -> None:
-        """Deserializes the model state from the given input.
+        """Deserialize the model state from the given input.
         Can be overwritten to load just parts of the state, decompress data, or other custom behavior.
         Needs to remain compatible with '_serialize_state'.
         """
         self.model.__dict__ = dill.loads(state)
 
     def _write_cache_file(self) -> None:
-        """Writes the cache from memory to 'cache_file_path'.
+        """Write the cache from memory to 'cache_file_path'.
         Can be overwritten to, for example, use a different file format or compression or destination.
         Needs to remain compatible with '_read_cache_file'.
         """
@@ -105,7 +105,7 @@ class ModelCachable:
         print("Wrote ModelCachable cache file to " + str(self.cache_file_path))
 
     def _read_cache_file(self) -> None:
-        """Reads the cache from 'cache_file_path' into memory.
+        """Read the cache from 'cache_file_path' into memory.
         Can be overwritten to, for example, use a different file format or compression or location.
         Needs to remain compatible with '_write_cache_file'
         """
@@ -123,7 +123,7 @@ class ModelCachable:
         self.finish_run()
 
     def finish_run(self) -> None:
-        """Tells the caching functionality that the run is finished and operations such as writing the cache
+        """Tell the caching functionality that the run is finished and operations such as writing the cache
         file can be performed. Automatically called by the 'run_model' function after the run, but needs to be
         manually called, when calling the steps manually."""
         if self.run_finished:
@@ -188,7 +188,7 @@ class ModelCachableStreaming(ModelCachable):
             self.cache_file_stream = io.open(cache_file_path, 'rb')
 
     def finish_run(self) -> None:
-        """Tells the caching functionality that the run is finished and operations such as writing the cache
+        """Tell the caching functionality that the run is finished and operations such as writing the cache
         file can be performed. Automatically called by the 'run_model' function after the run, but needs to be
         manually called, when calling the steps manually."""
         super().finish_run()
