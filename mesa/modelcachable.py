@@ -81,7 +81,7 @@ class ModelCachable:
 
         Note that for large model states, it might make sense to add compression during the serialization.
         That way the size of the cache in memory can be reduced. Additionally, while, by default, the resulting output
-        cache file is compressed too (see '_write_cache_file), this is not the case, when using other file handling
+        cache file is compressed too (see '_write_cache_file'), this is not the case, when using other file handling
         behavior, such as writing to a buffered file stream during every step (see 'ModelCachableStreaming'). For such
         use-cases, a way to reduce the size of the resulting output cache file is to compress the individual steps. That
         way, for example, reading the cache from the file stream step by step remains possible, without having to
@@ -99,7 +99,7 @@ class ModelCachable:
     def _write_cache_file(self) -> None:
         """Writes the cache from memory to 'cache_file_path'.
         Can be overwritten to, for example, use a different file format or compression or destination.
-        Needs to remain compatible with '_read_cache_file'
+        Needs to remain compatible with '_read_cache_file'.
         """
         _write_cache_file(self.cache_file_path, self.cache)
         print("Wrote ModelCachable cache file to " + str(self.cache_file_path))
