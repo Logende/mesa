@@ -77,7 +77,7 @@ class ModelCachable:
     def _serialize_state(self) -> Any:
         """Serializes the model state.
         Can be overwritten to write just parts of the state or other custom behavior.
-        Needs to remain compatible with 'deserialize_state'.
+        Needs to remain compatible with '_deserialize_state'.
 
         Note that for large model states, it might make sense to add compression during the serialization.
         That way the size of the cache in memory can be reduced. Additionally, while, by default, the resulting output
@@ -92,14 +92,14 @@ class ModelCachable:
     def _deserialize_state(self, state: Any) -> None:
         """Deserializes the model state from the given input.
         Can be overwritten to load just parts of the state, decompress data, or other custom behavior.
-        Needs to remain compatible with 'serialize_state'.
+        Needs to remain compatible with '_serialize_state'.
         """
         self.model.__dict__ = dill.loads(state)
 
     def _write_cache_file(self) -> None:
         """Writes the cache from memory to 'cache_file_path'.
         Can be overwritten to, for example, use a different file format or compression or destination.
-        Needs to remain compatible with 'read_cache_file'
+        Needs to remain compatible with '_read_cache_file'
         """
         _write_cache_file(self.cache_file_path, self.cache)
         print("Wrote ModelCachable cache file to " + str(self.cache_file_path))
@@ -107,7 +107,7 @@ class ModelCachable:
     def _read_cache_file(self) -> None:
         """Reads the cache from 'cache_file_path' into memory.
         Can be overwritten to, for example, use a different file format or compression or location.
-        Needs to remain compatible with 'write_cache_file'
+        Needs to remain compatible with '_write_cache_file'
         """
         self.cache = _read_cache_file(self.cache_file_path)
 
