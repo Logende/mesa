@@ -1,5 +1,4 @@
 import gzip
-import pickle
 import lzma
 import dill
 
@@ -281,9 +280,9 @@ class TestModelCachable(unittest.TestCase):
     def test_custom_serialization(self):
         """This test compares the cache file outputs from ModelCachable versus ModelCachableCustomSerialization.
         The latter implements custom state serialization and deserialization. Instead of storing the complete model
-         state, it stores only the 'current' value of the model in the cache. The resulting cache file should be
+        state, it stores only the 'current' value of the model in the cache. The resulting cache file should be
         significantly smaller than the one from the default ModelCachable.
-        This test mainly serves as demonstration on how custom state serialization could be implemented."""
+        This test mainly serves as demonstration on how custom state serialization can be implemented."""
         with TemporaryDirectory() as tmp_dir_path:
             cache_file_path_1 = Path(tmp_dir_path).joinpath("cache_file_1")
             cache_file_path_2 = Path(tmp_dir_path).joinpath("cache_file_2")

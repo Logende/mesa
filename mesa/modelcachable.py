@@ -39,12 +39,48 @@ def _read_cache_file(cache_file_path: Path) -> List[Any]:
 
 
 def _stream_write_next_chunk_size(stream: IO, size: int):
+    """The ModelCachableStreaming functionality writes each step into the cache file stream as a separate 'chunk'.
+    To enable the stream reading functionality to know how big the next data chunk of the stream is, before every chunk
+    the chunk size is written into the stream. This function writes the chunk size into the given stream."""
     chunk_length_bytes = size.to_bytes(length=8, byteorder='little', signed=False)
     stream.write(chunk_length_bytes)
 
 
 def _stream_read_next_chunk_size(stream):
+    """The ModelCachableStreaming functionality writes each step into the cache file stream as a separate 'chunk'.
+    To enable the stream reading functionality to know how big the next data chunk of the stream is, before every chunk
+    the chunk size is written into the stream. This function reads the next chunk size from the stream."""
     return int.from_bytes(stream.read(8), byteorder='little', signed=False)
+
+
+def _strip_off_unneeded_data_from_model_dict(original_model_dict: dict):
+    """If not overwritten by custom serialization, ModelCachable persists the complete 'model.__dict__' for every step.
+    Not everything that the model dict contains needs to be cached. As most model properties are model-specific, the
+    decision of what to store and what not to store is up to the person developing the model, which they can do by
+    overwriting the 'ModelCachable._serialize_state' function. Some generic optimization, however, can be made:
+    Many mesa models use the mesa scheduling and/or the mesa datacollector functionality. The scheduler does not need to
+    be cached, therefore, we can remove it. The datacollector stores not only data from the current, but also from the
+    previous steps. This we can change, by deleting all data from the previous steps. That is exactly what this function
+    does. The original dict of the model is taken as input, copied and then unneeded data is removed from the copy. This
+    stripped copy is then returned."""
+    dict_copy = dill.copy(original_model_dict)
+    dict_copy["schedule"] = None
+    if "datacollector" in dict_copy:
+        data_collector = dict_copy["datacollector"]
+
+        model_vars: dict = data_collector.model_vars
+        for key in model_vars.keys():
+            values_list: List = model_vars[key]
+            latest_value = values_list[len(values_list) - 1]
+            model_vars[key] = [latest_value]
+
+        agent_records: dict = data_collector._agent_records
+        if not len(agent_records) == 0:
+            latest_agent_record_key = len(agent_records) - 1
+            latest_agent_record_value = agent_records[latest_agent_record_key]
+            data_collector._agent_records = {latest_agent_record_key: latest_agent_record_value}
+
+    return dict_copy
 
 
 class ModelCachable:
@@ -87,7 +123,8 @@ class ModelCachable:
         way, for example, reading the cache from the file stream step by step remains possible, without having to
         load the complete cache into memory. This is not possible, when the complete output file is compressed.
         """
-        return dill.dumps(self.model.__dict__)
+        stripped_dict_model = _strip_off_unneeded_data_from_model_dict(self.model.__dict__)
+        return dill.dumps(stripped_dict_model)
 
     def _deserialize_state(self, state: Any) -> None:
         """Deserialize the model state from the given input.
