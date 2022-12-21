@@ -72,6 +72,12 @@ class ModelCachableCustomSerialization(ModelCachable):
 class TestModelCachable(unittest.TestCase):
 
     def test_model_attribute_access_over_wrapper(self):
+        """The actual simulation model is wrapped inside a ModelCachable instance.
+        The new model variable (which is of type ModelCachable and no longer of type ModelFibonacci) should
+        still behave the same way as the actual simulation model from outside. It should be possible to access the
+        attributes and functions of the underlying simulation model without knowing about the use of ModelCachable.
+        ModelCachable follows the decorator pattern: it adds functionality to the model, but from an outside perspective
+        the object can be still accessed the same way as before."""
         model = ModelFibonacci()
         model = ModelCachable(model, "irrelevant_cache_file_path", CacheState.WRITE)
         assert model.running is True
@@ -79,6 +85,9 @@ class TestModelCachable(unittest.TestCase):
         assert model.custom_model_function() == 1
 
     def test_cache_read_fail_when_non_existing_file(self):
+        """When we instantiate a ModelCachable with 'CacheState.READ' it (within its constructor) tries to load
+        the cache from the given cache path. If the cache file does not exist or is not of the expected format, an
+        exception is thrown."""
         model = ModelFibonacci()
 
         # No exception when constructing ModelCachable with CacheState.WRITE because does not try to read cache
@@ -87,11 +96,23 @@ class TestModelCachable(unittest.TestCase):
         # Exception when trying to construct ModelCachable with CacheState.READ and non-existing cache file
         self.assertRaises(Exception, ModelCachable, model, "non_existing_file", CacheState.READ)
 
+        # Exception when trying to construct ModelCachable with CacheState.READ and invalid cache file
+        with TemporaryDirectory() as tmp_dir_path:
+            broken_cache_file_path = Path(tmp_dir_path).joinpath("broken_cache_file")
+            with open(broken_cache_file_path, 'w') as broken_cache_file:
+                broken_cache_file.write("invalid content")
+            self.assertRaises(Exception, ModelCachable, model, broken_cache_file_path, CacheState.READ)
+
     def test_cache_file_creation(self):
+        """When a model is simulated and ModelCachable with 'CacheState.WRITE' is used, the simulation steps are
+        written to a cache. At the end of the simulation process (when 'ModelCachable.finish_run()' is called) the
+         cache is persisted by writing to the given 'cache_file_path'."""
         with TemporaryDirectory() as tmp_dir_path:
             cache_file_path = Path(tmp_dir_path).joinpath("cache_file")
 
+            # Before simulation: cache file does not yet exist
             assert not cache_file_path.is_file() and not cache_file_path.exists()
+
             # Simulate
             model_simulate = ModelFibonacci()
             model_simulate = ModelCachable(model_simulate, cache_file_path, CacheState.WRITE)
@@ -99,6 +120,7 @@ class TestModelCachable(unittest.TestCase):
                 model_simulate.step()
             model_simulate.finish_run()
 
+            # After finished run: cache file does exist
             assert cache_file_path.is_file()
 
             # assert that file created by default ModelCachable can be opened using gzip and then dill
@@ -106,6 +128,8 @@ class TestModelCachable(unittest.TestCase):
                 dill.load(file)
 
     def test_compare_replay_with_simulation(self):
+        """When replaying a simulation using the caching functionality, the replay should result in the model having
+        the same attributes in every step, as it had during the simulation."""
         with TemporaryDirectory() as tmp_dir_path:
             cache_file_path = Path(tmp_dir_path).joinpath("cache_file")
             step_count = 20
@@ -131,6 +155,8 @@ class TestModelCachable(unittest.TestCase):
             assert values_replay == values_simulate
 
     def test_cache_size(self):
+        """When caching a simulation for n steps and then replaying it, the replay should end at the exact same step as
+        the simulation did."""
         with TemporaryDirectory() as tmp_dir_path:
             cache_file_path = Path(tmp_dir_path).joinpath("cache_file")
             step_count = 20
@@ -148,6 +174,9 @@ class TestModelCachable(unittest.TestCase):
             assert len(model_replay.cache) == step_count
 
     def test_automatic_save_after_run_finished(self):
+        """When using the 'ModelCachable.run_model()' function, the simulation will simulate steps until it reaches
+        'model.running=False'. When it reaches this end condition and stops running, the 'ModelCachable.finish_run()'
+        function should automatically be called to persist the cache."""
         with TemporaryDirectory() as tmp_dir_path:
             cache_file_path = Path(tmp_dir_path).joinpath("cache_file")
 
@@ -163,6 +192,11 @@ class TestModelCachable(unittest.TestCase):
             assert mock_function.call_count == 1
 
     def test_replay_finish_identical_to_simulation_finish(self):
+        """This test lets the simulation run until it reaches 'running=False'. Then the cache is automatically
+        persisted. Next the simulation is replayed by reading from the cache. We assert that the replay stops at the
+        same step as the simulation and that it stops with the same result state/value too. This test differs only
+        slightly from 'test_cache_size' by using the 'run_model' function instead of simulating a pre-defined step count.
+        """
         with TemporaryDirectory() as tmp_dir_path:
             cache_file_path = Path(tmp_dir_path).joinpath("cache_file")
 
@@ -184,6 +218,10 @@ class TestModelCachable(unittest.TestCase):
             assert final_value_replay == final_value_simulation
 
     def test_custom_cache_file_handling(self):
+        """This test compares the cache file outputs from ModelCachable versus ModelCachableCustomFileHandling.
+        The latter implements custom file handling and uses a stronger compression. The resulting cache file should be
+        smaller than the one from the default ModelCachable.
+        This test mainly serves as demonstration on how custom file handling could be implemented."""
         with TemporaryDirectory() as tmp_dir_path:
             cache_file_path_1 = Path(tmp_dir_path).joinpath("cache_file_1")
             cache_file_path_2 = Path(tmp_dir_path).joinpath("cache_file_2")
@@ -207,6 +245,11 @@ class TestModelCachable(unittest.TestCase):
             assert cache_file_path_2.stat().st_size * 1.1 < cache_file_path_1.stat().st_size
 
     def test_custom_serialization(self):
+        """This test compares the cache file outputs from ModelCachable versus ModelCachableCustomSerialization.
+        The latter implements custom state serialization and deserialization. Instead of storing the complete model
+         state, it stores only the 'current' value of the model in the cache. The resulting cache file should be
+        significantly smaller than the one from the default ModelCachable.
+        This test mainly serves as demonstration on how custom state serialization could be implemented."""
         with TemporaryDirectory() as tmp_dir_path:
             cache_file_path_1 = Path(tmp_dir_path).joinpath("cache_file_1")
             cache_file_path_2 = Path(tmp_dir_path).joinpath("cache_file_2")
@@ -230,6 +273,9 @@ class TestModelCachable(unittest.TestCase):
             assert cache_file_path_2.stat().st_size * 35 < cache_file_path_1.stat().st_size
 
     def test_model_cachable_optimized_precision(self):
+        """This test uses ModelCachableOptimized. It verifies that when using 'precision' > 1 the cache will store
+        correspondingly fewer steps. The idea of precision is that enables storing only every n-th step, making it
+        possible to drastically reduce cache size and increase replay performance."""
         for precision in (1, 2, 3, 8):
             with TemporaryDirectory() as tmp_dir_path:
                 cache_file_path = Path(tmp_dir_path).joinpath("cache_file")
@@ -261,6 +307,16 @@ class TestModelCachable(unittest.TestCase):
                 assert model_replay.step_count == expected_replay_steps
 
     def test_model_cachable_optimized_compress_steps(self):
+        """ModelCachableOptimized also has the option of compressing the content of each step.
+        It could be argued that the persisted cache file can already have its own compression provided by the
+        'ModelCachable._write_cache_file' function, making the compression of individual steps somewhat unnecessary.
+        Compressing individual steps, however, can reduce cache size also in memory. Additionally, when using IO
+        streaming functionality to write to the cache file (see 'ModelCachableStreaming') during each individual step,
+        it useful to be able to compress those individual steps that are being persisted. For storage, the resulting
+        cache file could still be compressed again, to reduce size further, but that compression of the complete file
+        would make buffered stream reading from the file impossible. By compressing just individual steps, it remains
+        possible to read the states step by step, without the need of having the complete cache in memory.
+         """
         with TemporaryDirectory() as tmp_dir_path:
             cache_file_path = Path(tmp_dir_path).joinpath("cache_file")
 
@@ -283,6 +339,9 @@ class TestModelCachable(unittest.TestCase):
             assert len(state_compression) * 1.1 < len(state_no_compression)
 
     def test_model_cachable_streaming_chunk_handling(self):
+        """This test verifies that the streaming functionality of 'ModelCachableStreaming' works properly:
+        for every step, first the size of the chunk (state) to persist is written to the stream. Next the actual
+        chunk is written."""
         with TemporaryDirectory() as tmp_dir_path:
             cache_file_path = Path(tmp_dir_path).joinpath("cache_file")
 
@@ -312,6 +371,9 @@ class TestModelCachable(unittest.TestCase):
             assert value_replay == value_simulate
 
     def test_model_cachable_streaming_results(self):
+        """This test uses ModelCachableStreaming. It runs a complete simulation, that is persisted using streaming.
+        Next it replays the simulation using the cache and streaming. Finally, it asserts that the final value of the
+        replay is the same as the final value of the simulation."""
         with TemporaryDirectory() as tmp_dir_path:
             cache_file_path = Path(tmp_dir_path).joinpath("cache_file")
 
